@@ -110,28 +110,28 @@ defmodule BinaryProxyServer.Command do
         end     
     end
 
-    def parseGet(data, state, pub, nonce, oldnonce) do
-        case state do
-            0 ->
-                {:error, :invalid_state}
-            1 ->
-                {:error, :invalid_state}
-            _ ->
-                case BinaryProxy.Registry.lookup(BinaryProxy.Registry, pub) do
-                    {:ok, pid} -> 
-                        value = BinaryProxy.Bucket.get(pid)
-                        case value do
-                            "EMPTY" ->
-                                    {:error, :invalid_data}
-                                _->
-                                    response = << 0x01, 0x05 >> <> nonce <> value
-                                    {:ok, response, state, pub}
-                        end
-                    :error -> 
-                        {:error, :invalid_data}
-                end
-        end    
+  def parseGet(data, 0, pub, nonce, oldnonce), do: {:error, :invalid_state}
+  def parseGet(data, 1, pub, nonce, oldnonce), do: {:error, :invalid_state}
+
+  def parseGet(data, state, pub, nonce, oldnonce) do
+    with {:ok, pid} <- BinaryProxy.Registry.lookup(BinaryProxy.Registry, pub),
+         {:ok, response} <- check_empty_value(nonce, pid) do
+      {:ok, response, state, pub}
+    else
+      _ ->
+        {:error, :invalid_data}
     end
+  end
+
+  defp check_empty_value(nonce, pid) do
+    case BinaryProxy.Bucket.get(pid) do
+      "EMPTY" ->
+        :error
+
+      value ->
+        <<0x01, 0x05>> <> nonce <> value
+    end
+  end
 
     def parseSend(data, state, pub, nonce, oldnonce) do
         case state do
