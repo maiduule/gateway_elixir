@@ -1,10 +1,9 @@
 defmodule BinaryProxyServer.Command do
-    require Logger
 
     @signed_curve :secp256r1
 
     def parsePackage(data, state, pub, nonce, oldnonce) do
-        <<command::binary-size(1), rest::binary>> = data
+        <<command::binary-size(1), _rest::binary>> = data
         case command do
           <<0x03>> -> parseGetNonce(state, pub, nonce, oldnonce)
           <<0x04>> -> parseInit(data, state, pub, nonce, oldnonce)
@@ -15,6 +14,7 @@ defmodule BinaryProxyServer.Command do
     end
 
     def parseGetNonce( state, pub, nonce, oldnonce) do
+
         case state do
             0 ->
                 response = << 0x01, 0x03 >> <> nonce
@@ -79,6 +79,7 @@ defmodule BinaryProxyServer.Command do
     defp prepand_zero_if_needed(bytes), do: bytes
 
     def parseInit(data, state, pub, nonce, oldnonce) do
+
         case state do
             0 ->
                 {:error, :invalid_state}
@@ -110,76 +111,72 @@ defmodule BinaryProxyServer.Command do
         end     
     end
 
-  def parseGet(data, 0, pub, nonce, oldnonce), do: {:error, :invalid_state}
-  def parseGet(data, 1, pub, nonce, oldnonce), do: {:error, :invalid_state}
+    def parseGet(data, 0, pub, nonce, oldnonce), do: {:error, :invalid_state}
+    def parseGet(data, 1, pub, nonce, oldnonce), do: {:error, :invalid_state}
 
-  def parseGet(data, state, pub, nonce, oldnonce) do
-    with {:ok, pid} <- BinaryProxy.Registry.lookup(BinaryProxy.Registry, pub),
-         {:ok, response} <- check_empty_value(nonce, pid) do
-      {:ok, response, state, pub}
-    else
-      _ ->
-        {:error, :invalid_data}
+    def parseGet(data, state, pub, nonce, oldnonce) do
+        with {:ok, pid} <- BinaryProxy.Registry.lookup(BinaryProxy.Registry, pub),
+            {:ok, response} <- check_empty_value(nonce, pid) do
+                {:ok, response, state, pub}
+        else
+        _ ->
+            {:error, :invalid_data}
+        end
     end
-  end
 
-  defp check_empty_value(nonce, pid) do
-    case BinaryProxy.Bucket.get(pid) do
-      "EMPTY" ->
-        :error
-
-      value ->
-        <<0x01, 0x05>> <> nonce <> value
+    defp check_empty_value(nonce, pid) do
+        case BinaryProxy.Bucket.get(pid) do
+        "EMPTY" ->
+            :error
+        value ->
+            {:ok, <<0x01, 0x05>> <> nonce <> value}
+        end
     end
-  end
+
+    def parseSend(data, 0, pub, nonce, oldnonce), do: {:error, :invalid_state}
+    def parseSend(data, 1, pub, nonce, oldnonce), do: {:error, :invalid_state}
 
     def parseSend(data, state, pub, nonce, oldnonce) do
-        case state do
-            0 ->
-                {:error, :invalid_state}
-            1 ->
-                {:error, :invalid_state}
-            _ ->
+        
+        #Split command byte and container
+        <<command::binary-size(1), istoredata::bitstring >> = data
 
-                #Split command byte and container
-                <<command::binary-size(1), istoredata::bitstring >> = data
+        #extract header info from container
+        << isize::big-signed-integer-size(32), inonce::binary-size(16), 
+        isenderpub::binary-size(64), ireceiversize::big-signed-integer-size(8),
+        isendtopub::binary-size(64), isendtokey::binary-size(16), idata::bitstring>> = istoredata
 
-                #extract header info from container
-                << isize::big-signed-integer-size(32), inonce::binary-size(16), 
-                isenderpub::binary-size(64), ireceiversize::big-signed-integer-size(8),
-                isendtopub::binary-size(64), isendtokey::binary-size(16), idata::bitstring>> = istoredata
+        if isize < byte_size(data) do
+            if inonce == oldnonce do
+                if isenderpub == pub do
 
-                if isize < byte_size(data) do
-                    if inonce == oldnonce do
-                        if isenderpub == pub do
-    
-                            #split container data and signature
-                            <<messagetoverify::binary-size(isize), isignature::bitstring >> = istoredata
-    
-                            pubforverify = <<0x4>> <> isenderpub
-                            signatureverify = :crypto.verify(:ecdsa, :sha256, expand_to_64_blocks(messagetoverify), fill_signature(isignature), [pubforverify, @signed_curve])
-    
-                            if signatureverify == true do
-                                case BinaryProxy.Registry.lookup(BinaryProxy.Registry, isendtopub) do
-                                    {:ok, pid} -> 
-                                        BinaryProxy.Bucket.put(pid, istoredata)
-                                        response = << 0x01, 0x06 >> <> nonce
-                                        {:ok, response, state, pub}
-                                    :error -> 
-                                        {:error, :invalid_data}
-                                end
-                            else
+                    #split container data and signature
+                    <<messagetoverify::binary-size(isize), isignature::bitstring >> = istoredata
+
+                    pubforverify = <<0x4>> <> isenderpub
+                    signatureverify = :crypto.verify(:ecdsa, :sha256, expand_to_64_blocks(messagetoverify), fill_signature(isignature), [pubforverify, @signed_curve])
+
+                    if signatureverify == true do
+                        case BinaryProxy.Registry.lookup(BinaryProxy.Registry, isendtopub) do
+                            {:ok, pid} -> 
+                                BinaryProxy.Bucket.put(pid, istoredata)
+                                response = << 0x01, 0x06 >> <> nonce
+                                {:ok, response, state, pub}
+                            :error -> 
                                 {:error, :invalid_data}
-                            end
-                        else
-                            {:error, :invalid_data}
                         end
                     else
                         {:error, :invalid_data}
                     end
+
                 else
                     {:error, :invalid_data}
                 end
-        end    
+            else
+                {:error, :invalid_data}
+            end
+        else
+            {:error, :invalid_data}
+        end
     end
 end

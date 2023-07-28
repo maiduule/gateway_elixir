@@ -23,7 +23,8 @@ defmodule BinaryProxy.Registry do
         # 2. Lookup is now done directly in ETS, without accessing the server
         case :ets.lookup(server, name) do
         [{^name, pid}] -> {:ok, pid}
-        [] -> :error
+        [] ->
+            :error
         end
     end
 
@@ -50,13 +51,13 @@ defmodule BinaryProxy.Registry do
     def handle_call({:create, name}, _from, {names, refs}) do
         case lookup(names, name) do
             {:ok, pid} ->
-            {:reply, pid, {names, refs}}
+                {:reply, pid, {names, refs}}
             :error ->
-            {:ok, pid} = DynamicSupervisor.start_child(BinaryProxy.BucketSupervisor, BinaryProxy.Bucket)
-            ref = Process.monitor(pid)
-            refs = Map.put(refs, ref, name)
-            :ets.insert(names, {name, pid})
-            {:reply, pid, {names, refs}}
+              {:ok, pid} = DynamicSupervisor.start_child(BinaryProxy.BucketSupervisor, BinaryProxy.Bucket)
+              ref = Process.monitor(pid)
+              refs = Map.put(refs, ref, name)
+              :ets.insert(names, {name, pid})
+              {:reply, pid, {names, refs}}
         end
     end
 
